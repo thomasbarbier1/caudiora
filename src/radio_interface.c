@@ -21,6 +21,8 @@ typedef struct radio_data {
     struct ringbuf *input_buf;
     sem_t           semaphore;
     // public data
+    void*           acquisition_cb;
+    void*           user_ctx;
     uint8_t         output_buf[BUFFER_SIZE];
     uint32_t        overflow_counter;
 } radio_data_t;
@@ -152,11 +154,7 @@ static void *sample_consumer_loop(void *ctx)
         uint32_t size = ringbuf_read(radio_data.input_buf, radio_data.output_buf, radio_data.buf_size);
         if (size > 0)
         {
-            if (size % 2 != 0)
-            {
-               radio_data.output_buf[size] = radio_data.output_buf[size-1];
-               size++;
-            }
+            // callback call here
         }
     }
     return NULL;
