@@ -4,19 +4,36 @@
 #include <math.h>
 #include <errno.h>
 #include <pthread.h>
-#include "rtlsdr_interface.h"
+#include "radio_interface.h"
 
 #include <unistd.h>
 
 #include "rtl-sdr.h"
+
+/* ---------------------------------------------------------------------------------------------------------------------
+ * Local variables
+ * -------------------------------------------------------------------------------------------------------------------*/
+
+typedef struct radio_data {
+    // private data
+    atomic_bool     running;
+    size_t          buf_size;
+    struct ringbuf *input_buf;
+    sem_t           semaphore;
+    // public data
+    uint8_t         output_buf[BUFFER_SIZE];
+    uint32_t        overflow_counter;
+} radio_data_t;
+
+static radio_data_t   radio_data;
+static rtlsdr_dev_t  *radio_device = NULL;
 
 /***********************************************************************************************************************
  * Private functions declaration
  **********************************************************************************************************************/
 
 static void on_samples(unsigned char *buf, uint32_t len, void *ctx);
-static void *radio_thread_loop(void *ctx);
-static double compute_mean_complex_magnitude(const uint8_t *iq_samples, uint32_t len);
+static void *sample_consumer_loop(void *ctx);
 
 /***********************************************************************************************************************
  * Public functions implementation
@@ -66,13 +83,22 @@ int radio_config(uint32_t central_frequency, uint32_t bandwidth, uint32_t sample
     return 0;
 }
 
-void* radio_stream_start(void* ctx)
+int radio_init(void)
 {
     radio_data.buf_size = BUFFER_SIZE;
     radio_data.input_buf = ringbuf_new(radio_data.buf_size);
-    radio_data.overflow_ctn = 0;
+    if (radio_data.input_buf == NULL)
+    {
+        return 1;
+    }
+    radio_data.overflow_counter = 0;
     sem_init(&radio_data.semaphore, 1, 1);
+    radio_data.running = true;
 
+    return 0;
+}
+void* radio_stream_start(void* ctx)
+{
     if (radio_data.input_buf == NULL)
     {
         fprintf(stderr, "failed to allocate buffer\n");
@@ -80,7 +106,7 @@ void* radio_stream_start(void* ctx)
     }
 
     pthread_t consume_thread;
-    pthread_create(&consume_thread, NULL, radio_thread_loop, NULL);
+    pthread_create(&consume_thread, NULL, sample_consumer_loop, NULL);
 
     rtlsdr_read_async(radio_device, on_samples, NULL, 0, 0);
     pthread_join(consume_thread, NULL);
@@ -96,7 +122,8 @@ uint32_t radio_stream_stop(void)
     sem_post(&radio_data.semaphore); // in case the semaphore is waiting, we unlock it first
     sem_destroy(&radio_data.semaphore);
     ringbuf_free(radio_data.input_buf);
-    return radio_data.overflow_ctn;
+
+    return radio_data.overflow_counter;
 }
 
 /***********************************************************************************************************************
@@ -112,12 +139,12 @@ static void on_samples(unsigned char *buf, uint32_t len, void *ctx)
     uint32_t size = ringbuf_write(radio_data.input_buf, buf, len);
     if (size != len)
     {
-        radio_data.overflow_ctn++;
+        radio_data.overflow_counter++;
     }
     sem_post(&radio_data.semaphore);
 }
 
-static void *radio_thread_loop(void *ctx)
+static void *sample_consumer_loop(void *ctx)
 {
     while (radio_data.running)
     {
@@ -133,16 +160,4 @@ static void *radio_thread_loop(void *ctx)
         }
     }
     return NULL;
-}
-
-static double compute_mean_complex_magnitude(const uint8_t *iq_samples, uint32_t len)
-{
-    double sum = 0;
-    for (uint32_t k=0; k<len-1; k += 2)
-    {
-        double I = iq_samples[k] - 127.5;
-        double Q = iq_samples[k+1] - 127.5;
-        sum += sqrt(I*I + Q*Q);
-    }
-    return sum / (len / 2);
 }

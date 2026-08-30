@@ -1,19 +1,11 @@
 #include <stdio.h>
 #include <stdint.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <errno.h>
 #include <unistd.h>
-
-#include "rtl-sdr.h"
-#include "rtlsdr_interface.h"
+#include "radio_interface.h"
 
 #define CENTER_FREQUENCY (uint32_t)868300000
 #define SAMPLE_RATE      (uint32_t)2400000
 #define BANDWIDTH        (uint32_t)125000
-
-radio_data_t radio_data;
-rtlsdr_dev_t *radio_device;
 
 int main(void)
 {
@@ -23,7 +15,12 @@ int main(void)
         return 1;
     }
 
-    radio_data.running = true;
+    if (radio_init() != 0)
+    {
+        printf("Failed to initialize radio parameters. End of program.\n");
+        return 1;
+    }
+
     pthread_t radio_thread;
     pthread_create(&radio_thread, NULL, radio_stream_start, NULL);
 
