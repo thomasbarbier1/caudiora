@@ -3,44 +3,37 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <errno.h>
-#include <time.h>
+#include <unistd.h>
+
 #include "rtl-sdr.h"
 #include "rtlsdr_interface.h"
 
-#define CENTER_FREQUENCY     (uint32_t)868300000
-#define SAMPLE_RATE          (uint32_t)2400000
-#define BANDWIDTH            (uint32_t)125000
+#define CENTER_FREQUENCY (uint32_t)868300000
+#define SAMPLE_RATE      (uint32_t)2400000
+#define BANDWIDTH        (uint32_t)125000
 
-rtlsdr_context_t radio_context = {
-    .lock = PTHREAD_MUTEX_INITIALIZER,
-    .cv   = PTHREAD_COND_INITIALIZER,
-    .new_data_is_available = false,
-    .running = true,
-    .data = 0,
-    .data_len = 0
-};
-
+radio_data_t radio_data;
 rtlsdr_dev_t *radio_device;
 
 int main(void)
 {
-    const rtlsdr_config_t config =
+    if (radio_config(CENTER_FREQUENCY, BANDWIDTH, SAMPLE_RATE) != 0)
     {
-        .central_frequency = CENTER_FREQUENCY,
-        .bandwidth         = BANDWIDTH,
-        .sample_rate       = SAMPLE_RATE,
-    };
-
-    if (rtlsdr_init(&config) != 0)
-    {
-        printf("Error: unable to configure radio device\n");
+        printf("Failed to configure the radio. End of program.\n");
+        return 1;
     }
 
+    radio_data.running = true;
+    pthread_t radio_thread;
+    pthread_create(&radio_thread, NULL, radio_stream_start, NULL);
 
-    rtlsdr_stream_start();
-    rtlsdr_stream_stop();
+    sleep(5);
 
+    uint32_t overflow_nb = radio_stream_stop();
+    pthread_join(radio_thread, NULL);
+    printf("Number of buffer overflow: %u\n", overflow_nb);
     printf("End of program.\n");
+
     return 0;
 }
 

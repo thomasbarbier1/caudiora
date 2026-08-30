@@ -11,6 +11,6 @@ pkg_check_modules(RTLSDR REQUIRED IMPORTED_TARGET librtlsdr)
 add_executable(caudiora
         src/main.c
         src/rtlsdr_interface.c
-        )
+)
 
 target_link_libraries(caudiora PRIVATE PkgConfig::RTLSDR m)
