@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include "radio_interface.h"
+#include "acquisition.h"
 
 #define CENTER_FREQUENCY (uint32_t)868300000
 #define SAMPLE_RATE      (uint32_t)2400000
@@ -18,6 +19,12 @@ int main(void)
     if (radio_init() != 0)
     {
         printf("Failed to initialize radio parameters. End of program.\n");
+        return 1;
+    }
+
+    if (acquisition_init() != 0)
+    {
+        printf("Failed to initialize acquisition. End of program.\n");
         return 1;
     }
 

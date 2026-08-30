@@ -1,33 +1,36 @@
-#include "acquisition.h"
-
 #include <math.h>
 #include <stdio.h>
+#include "acquisition.h"
+#include "radio_interface.h"
 
-enum acquisition_state
-{
-    INIT = 0,
-    CALIBRATING,
-    LISTENING,
-    RECORDING,
-    PAUSE
-};
+typedef enum {
+    ACQ_INIT = 0,
+    ACQ_CALIBRATING,
+    ACQ_LISTENING,
+    ACQ_RECORDING,
+    ACQ_PAUSE
+} acq_state_e;
 
-typedef struct acquisition_data
+typedef struct
 {
-    enum acquisition_state state;
+    acq_state_e state;
     uint8_t detection_threshold;
     uint8_t recording_buffer[RECORDING_BUFFER_SIZE];
 } acquisition_data_t;
 
 static acquisition_data_t acquisition_data;
 
-void acquisition_init(void)
+int acquisition_init(void)
 {
-    acquisition_data.state = INIT;
+    acquisition_data.state = ACQ_INIT;
+    radio_set_callback(on_iq_samples, &acquisition_data);
+    return 0;
 }
 
-void acquisition_cb(const uint8_t *iq, size_t len, void *user_ctx)
+static void on_iq_samples(const uint8_t *iq, size_t len, void *user_ctx)
 {
+    acquisition_data_t *acquisition_data = (acquisition_data_t *) user_ctx;
+
     double sum = 0;
     for (int i=0; i<len-1; i++)
     {

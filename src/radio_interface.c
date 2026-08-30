@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include "radio_interface.h"
 
+#include <assert.h>
 #include <unistd.h>
 
 #include "rtl-sdr.h"
@@ -16,15 +17,15 @@
 
 typedef struct radio_data {
     // private data
-    atomic_bool     running;
-    size_t          buf_size;
-    struct ringbuf *input_buf;
-    sem_t           semaphore;
+    atomic_bool       running;
+    size_t            buf_size;
+    struct ringbuf   *input_buf;
+    sem_t             semaphore;
     // public data
-    void*           acquisition_cb;
-    void*           user_ctx;
-    uint8_t         output_buf[BUFFER_SIZE];
-    uint32_t        overflow_counter;
+    radio_sample_cb_t sample_cb;
+    void             *cb_ctx;
+    uint8_t           output_buf[BUFFER_SIZE];
+    uint32_t          overflow_counter;
 } radio_data_t;
 
 static radio_data_t   radio_data;
@@ -92,13 +93,14 @@ int radio_init(void)
     if (radio_data.input_buf == NULL)
     {
         return 1;
-    }
+    };
     radio_data.overflow_counter = 0;
     sem_init(&radio_data.semaphore, 1, 1);
     radio_data.running = true;
 
     return 0;
 }
+
 void* radio_stream_start(void* ctx)
 {
     if (radio_data.input_buf == NULL)
@@ -128,6 +130,19 @@ uint32_t radio_stream_stop(void)
     return radio_data.overflow_counter;
 }
 
+int radio_set_callback(radio_sample_cb_t cb, void *user_ctx)
+{
+    if (cb == NULL || user_ctx == NULL)
+    {
+        return 1;
+    }
+
+    radio_data.sample_cb = cb;
+    radio_data.cb_ctx    = user_ctx;
+
+    return 0;
+}
+
 /***********************************************************************************************************************
  * Private functions implementations
  **********************************************************************************************************************/
@@ -154,7 +169,8 @@ static void *sample_consumer_loop(void *ctx)
         uint32_t size = ringbuf_read(radio_data.input_buf, radio_data.output_buf, radio_data.buf_size);
         if (size > 0)
         {
-            // callback call here
+            assert(size % 2 == 0);
+            radio_data.sample_cb(radio_data.output_buf, size, radio_data.cb_ctx);
         }
     }
     return NULL;

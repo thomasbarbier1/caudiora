@@ -10,6 +10,7 @@
 
 #define RECORDING_BUFFER_SIZE 16777216
 
-void acquisition_init(void);
+int acquisition_init(void);
+static void on_iq_samples(const uint8_t *iq, size_t len, void *user_ctx);
 
 #endif //CAUDIORA_ACQUISITION_H

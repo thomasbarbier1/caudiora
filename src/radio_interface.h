@@ -11,7 +11,7 @@
 #define DURATION_S           5
 #define BUFFER_SIZE          (uint32_t) 1048576
 
-typedef void (*acquisition_cb)(const uint8_t *iq, size_t len, void *user_ctx);
+typedef void (*radio_sample_cb_t)(const uint8_t *iq, size_t len, void *user_ctx);
 
 /* ---------------------------------------------------------------------------------------------------------------------
  * Public API
@@ -20,5 +20,5 @@ int radio_config(uint32_t central_frequency, uint32_t bandwidth, uint32_t sample
 int radio_init(void);
 void* radio_stream_start(void* ctx);
 uint32_t radio_stream_stop(void);
-
+int radio_set_callback(radio_sample_cb_t cb, void *user_ctx);
 #endif //CAUDIORA_RADIO_H
