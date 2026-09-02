@@ -12,6 +12,7 @@ add_executable(caudiora
         src/main.c
         src/radio_interface.c
         src/acquisition.c
+        src/processing.c
 )
 
 target_link_libraries(caudiora PRIVATE PkgConfig::RTLSDR m)

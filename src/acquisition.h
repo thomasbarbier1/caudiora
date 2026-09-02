@@ -1,16 +1,15 @@
-//
-// Created by thoma on 30/08/2026.
-//
-
 #ifndef CAUDIORA_ACQUISITION_H
 #define CAUDIORA_ACQUISITION_H
 
-#include <stddef.h>
 #include <stdint.h>
-
-#define RECORDING_BUFFER_SIZE 16777216
+#include <semaphore.h>
 
 int acquisition_init(void);
-static void on_iq_samples(const uint8_t *iq, const size_t len, void *user_ctx);
+static void on_iq_samples(const uint8_t *iq, size_t len, void *user_ctx);
+void unpause_acquisition(void);
+uint8_t* get_acquisition_buffer(void);
+sem_t* get_acquisition_semaphore(void);
+void get_buffer_length(uint32_t *length);
+double mean_power(const uint8_t *iq, size_t len);
 
 #endif //CAUDIORA_ACQUISITION_H

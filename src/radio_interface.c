@@ -40,7 +40,7 @@ static void *sample_consumer_loop(void *ctx);
  * Public functions implementation
  **********************************************************************************************************************/
 
-int radio_config(uint32_t central_frequency, uint32_t bandwidth, uint32_t sample_rate)
+int radio_config(void)
 {
     if (rtlsdr_open(&radio_device, DEFAULT_DEVICE_INDEX) < 0)
     {
@@ -49,36 +49,35 @@ int radio_config(uint32_t central_frequency, uint32_t bandwidth, uint32_t sample
     }
 
     uint8_t err = 0;
-    if (rtlsdr_set_center_freq(radio_device, central_frequency) != 0)
+    if (rtlsdr_set_center_freq(radio_device, CENTER_FREQUENCY) != 0)
     {
-        fprintf(stderr, "failed to set central frequency\n");
+        fprintf(stderr, "Failed to set central frequency\n");
         err = 1;
     }
-    if (rtlsdr_set_sample_rate(radio_device, sample_rate) != 0)
+    if (rtlsdr_set_sample_rate(radio_device, SAMPLE_RATE) != 0)
     {
-        fprintf(stderr, "failed to set sample rate\n");
+        fprintf(stderr, "Failed to set sample rate\n");
         err = 1;
     }
-    if (rtlsdr_set_tuner_bandwidth(radio_device, bandwidth) != 0)
+    if (rtlsdr_set_tuner_bandwidth(radio_device, BANDWIDTH) != 0)
     {
-        fprintf(stderr, "failed to set bandwidth\n");
+        fprintf(stderr, "Failed to set bandwidth\n");
         err = 1;
     }
     if (rtlsdr_set_tuner_gain_mode(radio_device, 0) != 0)
     {
-        fprintf(stderr, "failed to set tuner gain mode\n");
+        fprintf(stderr, "Failed to set tuner gain mode\n");
         err = 1;
     }
     if (rtlsdr_reset_buffer(radio_device) != 0)
     {
-        fprintf(stderr, "failed to reset buffer\n");
+        fprintf(stderr, "Failed to reset RTLSDR buffer\n");
         err = 1;
     }
 
     if (err == 1 && radio_device != NULL)
     {
         rtlsdr_close(radio_device);
-        return 1;
     }
 
     return err;
@@ -93,7 +92,7 @@ int radio_init(void)
         return 1;
     };
     radio_data.overflow_counter = 0;
-    sem_init(&radio_data.semaphore, 1, 1);
+    sem_init(&radio_data.semaphore, 0, 0);
     radio_data.running = true;
 
     return 0;
@@ -101,12 +100,6 @@ int radio_init(void)
 
 void* radio_stream_start(void* ctx)
 {
-    if (radio_data.input_buf == NULL)
-    {
-        fprintf(stderr, "failed to allocate buffer\n");
-        return NULL;
-    }
-
     pthread_t consume_thread;
     pthread_create(&consume_thread, NULL, sample_consumer_loop, NULL);
 
@@ -130,7 +123,7 @@ uint32_t radio_stream_stop(void)
 
 int radio_set_callback(radio_sample_cb_t cb, void *user_ctx)
 {
-    if (cb == NULL || user_ctx == NULL)
+    if (cb == NULL)
     {
         return 1;
     }
