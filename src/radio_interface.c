@@ -3,12 +3,10 @@
 #include <stdbool.h>
 #include <math.h>
 #include <errno.h>
-#include <pthread.h>
-#include "radio_interface.h"
-
-#include <assert.h>
 #include <unistd.h>
-
+#include <pthread.h>
+#include <assert.h>
+#include "radio_interface.h"
 #include "rtl-sdr.h"
 
 /* ---------------------------------------------------------------------------------------------------------------------
@@ -83,7 +81,7 @@ int radio_config(uint32_t central_frequency, uint32_t bandwidth, uint32_t sample
         return 1;
     }
 
-    return 0;
+    return err;
 }
 
 int radio_init(void)

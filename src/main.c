@@ -31,7 +31,7 @@ int main(void)
     pthread_t radio_thread;
     pthread_create(&radio_thread, NULL, radio_stream_start, NULL);
 
-    sleep(5);
+    sleep(10);
 
     uint32_t overflow_nb = radio_stream_stop();
     pthread_join(radio_thread, NULL);
