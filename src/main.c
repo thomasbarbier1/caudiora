@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <pthread.h>
 #include "radio_interface.h"
 #include "acquisition.h"
 #include "processing.h"
+
+// files path in the rapsberry pi: /tmp/tmp.4rshfrT8DF/caudiora/cmake-build-release-raspberrypi
 
 int main(void)
 {
@@ -37,7 +40,7 @@ int main(void)
     pthread_t processing_thread;
     pthread_create(&processing_thread, NULL, processing_start, NULL);
 
-    sleep(30);
+    sleep(8);
     uint32_t overflow_nb = radio_stream_stop();
     pthread_join(radio_thread, NULL);
     printf("Number of buffer overflow: %u\n", overflow_nb);

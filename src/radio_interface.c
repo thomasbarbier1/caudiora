@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <math.h>
-#include <errno.h>
-#include <unistd.h>
 #include <pthread.h>
 #include <assert.h>
+#include <semaphore.h>
+#include <stdatomic.h>
+#include "ringbuf.h" // https://github.com/szanni/ringbuf/tree/master
 #include "radio_interface.h"
 #include "rtl-sdr.h"
 
@@ -13,7 +13,7 @@
  * Local variables
  * -------------------------------------------------------------------------------------------------------------------*/
 
-typedef struct radio_data {
+typedef struct {
     // private data
     atomic_bool       running;
     size_t            buf_size;
@@ -90,7 +90,7 @@ int radio_init(void)
     if (radio_data.input_buf == NULL)
     {
         return 1;
-    };
+    }
     radio_data.overflow_counter = 0;
     sem_init(&radio_data.semaphore, 0, 0);
     radio_data.running = true;

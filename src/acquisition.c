@@ -1,14 +1,16 @@
 #include <math.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <pthread.h>
 #include <semaphore.h>
 #include "acquisition.h"
 #include "radio_interface.h"
 
 #define RECORDING_BUFFER_SIZE     (size_t) 16777216
-#define CALIBRATION_BUFFER_NUMBER (uint8_t) 100
+#define CALIBRATION_BUFFER_NUMBER (uint8_t) 20
 #define CALIBRATION_FACTOR        (double) 4.f
 
 typedef enum {
@@ -160,7 +162,9 @@ double mean_power(const uint8_t *iq, size_t len)
         double Q = iq[i+1] - 127.5;
         sum += I*I + Q*Q;
     }
-    return sum / len /2;
+    double mp = sum / len /2;
+    // printf("mp = %.3g\n", mp);
+    return mp;
 }
 
 /***********************************************************************************************************************
