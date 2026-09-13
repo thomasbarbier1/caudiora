@@ -4,15 +4,21 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <math.h>
+#include <string.h>
 #include "processing.h"
 
-#include <string.h>
+#include <assert.h>
 
 #include "acquisition.h"
 #include "radio_interface.h"
 #include "output.h"
 
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#define TESTNAME "caudiora_test.wav"
+
 #define AUDIO_RECORDING_SIZE (size_t) 16777216
+#define LP_FILTER_CUTOFF     (double) 125000
 #define MIN_SPAN_HZ          (double) 10
 #define AMPLITUDE_FLOOR      (double) 1e-8
 #define TWOPI                (double) (2.0 * M_PI)
@@ -21,19 +27,45 @@
 #define STRETCH_FACTOR       (double) 4.0
 #define ENVELOPE_TAU_S       (double) 500e-6   /* constante de temps du lissage */
 #define SQUELCH_RATIO        (double) 0.25     /* seuil de gate, en fraction du max */
-#define MIN(a,b) ((a) < (b) ? (a) : (b))
-#define MAX(a,b) ((a) > (b) ? (a) : (b))
-#define TESTNAME "caudiora_test.wav"
+#define FILTER_COEFF_NB      (int) 79
+#define DOWNSAMPING_FS       (double) 240000
+
+// see filter_coeff.py python script to see how the coeff are pre-calculated
+static const double FILTER_COEFFS[FILTER_COEFF_NB] =
+{
+    9.40272334e-05,  6.74913599e-05,  3.82907759e-05,  7.45567487e-06,
+   -2.23698387e-05, -4.62285855e-05, -5.69030291e-05, -4.60004303e-05,
+   -6.14087327e-06,  6.59539307e-05,  1.65959933e-04,  2.78770172e-04,
+    3.76508342e-04,  4.18604963e-04,  3.54626272e-04,  1.30198008e-04,
+   -3.04116971e-04, -9.81683840e-04, -1.90764386e-03, -3.04742351e-03,
+   -4.31782752e-03, -5.58262237e-03, -6.65420583e-03, -7.30236137e-03,
+   -7.27026729e-03, -6.29696472e-03, -4.14451002e-03, -6.27186109e-04,
+    4.36044648e-03,  1.08201047e-02,  1.86341904e-02,  2.75606595e-02,
+    3.72399438e-02,  4.72142235e-02,  5.69579301e-02,  6.59170016e-02,
+    7.35532733e-02,  7.93896455e-02,  8.30514092e-02,  8.42993952e-02,
+    8.30514092e-02,  7.93896455e-02,  7.35532733e-02,  6.59170016e-02,
+    5.69579301e-02,  4.72142235e-02,  3.72399438e-02,  2.75606595e-02,
+    1.86341904e-02,  1.08201047e-02,  4.36044648e-03, -6.27186109e-04,
+   -4.14451002e-03, -6.29696472e-03, -7.27026729e-03, -7.30236137e-03,
+   -6.65420583e-03, -5.58262237e-03, -4.31782752e-03, -3.04742351e-03,
+   -1.90764386e-03, -9.81683840e-04, -3.04116971e-04,  1.30198008e-04,
+    3.54626272e-04,  4.18604963e-04,  3.76508342e-04,  2.78770172e-04,
+    1.65959933e-04,  6.59539307e-05, -6.14087327e-06, -4.60004303e-05,
+   -5.69030291e-05, -4.62285855e-05, -2.23698387e-05,  7.45567487e-06,
+    3.82907759e-05,  6.74913599e-05,  9.40272334e-05
+};
 
 typedef struct
 {
     // private
     atomic_bool running;
     double      amplitude_floor;
+    double      filter_fc;
     double      audio_span_hz;
     double      audio_center_hz;
     double      input_bw;
     double      input_fs;
+    double      downsampled_fs;
     double      output_fs;
     double      stretch_factor;
 
@@ -52,19 +84,17 @@ static processing_t dsp_data;
 
 // dsp pipeline functions
 static int processing_pipeline(const uint8_t *iq, size_t len);
+static double* decimate(const double *input_signal, size_t input_length, double fs_in, double fs_out, size_t *output_len);
 static double* zero_centering_and_double_conversion(const uint8_t *iq, size_t len);
-static void normalize_complex_amplitude(double *iq, size_t len);
-static double* compute_instantaneous_frequency(const double *iq, size_t iq_len, double *freq, double *amp, size_t freq_len);
+static int compute_instantaneous_frequency(const double *iq, size_t iq_len, double **freq, double **amp, size_t *freq_len);
 static void prepare_amplitude_envelope(double *amp, size_t len);
 static void map_to_audio_band(double *freq, size_t N);
 static double* time_stretch(double *x_signal, size_t x_len, double stretch_factor, size_t* y_len);
 static double* linear_interpolation(const double* x_time, const double* x_signal, size_t x_len, const double* y_time, size_t y_len);
 static void interpolate_value(const double* x_signal, const double* x_vect, size_t left_idx, size_t right_idx, double* y_signal, const double* y_vect, size_t y_idx);
 static void audio_render(const double* f, double* y, size_t len, double *amp_envelope);
-// helpers
 static double clip(double val, double lower, double upper);
-int export_signal_csv_cmplx(const char* filename, const uint8_t *data, size_t length, size_t offset);
-int export_signal_csv(const char* filename, const double *data, size_t length, size_t offset);
+
 /***********************************************************************************************************************
  * Public functions implementation
  **********************************************************************************************************************/
@@ -73,9 +103,11 @@ int processing_init(void)
 {
     dsp_data.iq              = get_acquisition_buffer();
     dsp_data.processing_sem  = get_acquisition_semaphore();
+    dsp_data.filter_fc       = LP_FILTER_CUTOFF;
     dsp_data.amplitude_floor = AMPLITUDE_FLOOR;
     dsp_data.input_bw        = (double) BANDWIDTH;
     dsp_data.input_fs        = (double) SAMPLE_RATE;
+    dsp_data.downsampled_fs  = DOWNSAMPING_FS;
     dsp_data.output_fs       = (double) AUDIO_SAMPLE_RATE;
     dsp_data.audio_span_hz   = (double) 1000.0;
     dsp_data.audio_center_hz = (double) 2000.0;
@@ -108,27 +140,16 @@ void* processing_start(void *ctx)
         get_buffer_length(&dsp_data.len);
         if (dsp_data.len != 0)
         {
-            // double v = mean_power(processing_data.iq, processing_data.len);
-            // printf("v: %lf \t len: %u\n", v, processing_data.len);
-            processing_pipeline(dsp_data.iq, dsp_data.len);
+            int rc = processing_pipeline(dsp_data.iq, dsp_data.len);
+            if (rc != 0)
+            {
+                printf("failed to process signal.\n");
+            }
         }
         unpause_acquisition();
     }
 
     return NULL;
-}
-
-void test()
-{
-    size_t len = 1000000;
-    double* x = malloc(len * sizeof(double));
-    for (int i=0; i<len; i++)
-    {
-        x[i] = (double) 0.3 * sin(TWOPI * 200 * i / AUDIO_SAMPLE_RATE);
-    }
-
-    write_wav(TESTNAME, x, len);
-    free(x);
 }
 
 /***********************************************************************************************************************
@@ -142,15 +163,20 @@ static int processing_pipeline(const uint8_t *iq, size_t len)
         return 1;
     }
 
+    // Zero centering and cast to double
     double* iq_as_double = zero_centering_and_double_conversion(iq, len);
+    if (iq_as_double == NULL) return 1;
 
-    // to be implemented: remove the DC offset and apply a LPF and decimate to 400kHz
+    // Decimation to 240 kHz
+    size_t decimated_len;
+    double* decimated = decimate(iq_as_double, len, dsp_data.input_fs, dsp_data.downsampled_fs, &decimated_len);
+    if (decimated == NULL) return 1;
 
-    // Getting the instantaneous frequency from the phase
-    size_t freq_len = len / 2;
-    double* freq = malloc(freq_len * sizeof(double));
-    double* amp  = malloc(freq_len * sizeof(double));
-    compute_instantaneous_frequency(iq_as_double, len, freq, amp, freq_len);
+    // Recovering the instantaneous frequency from the phase
+    size_t  freq_len = 0;
+    double* freq     = NULL;
+    double* amp      = NULL;
+    compute_instantaneous_frequency(decimated, decimated_len, &freq, &amp, &freq_len);
     prepare_amplitude_envelope(amp, freq_len);
 
     // Mapping to audioband
@@ -162,13 +188,14 @@ static int processing_pipeline(const uint8_t *iq, size_t len)
     double* stretched_amp  = time_stretch(amp, freq_len, dsp_data.stretch_factor, &stretched_len);
 
     // Generating the audio signal from the frequency
-    double* audio = malloc(stretched_len * sizeof(double));
+    double* audio  = malloc(stretched_len * sizeof(double));
     audio_render(stretched_freq, audio, stretched_len, stretched_amp);
 
     // Exporting to wav
-    write_wav(NULL, audio, (size_t) stretched_len);
+    write_wav(NULL, audio, stretched_len);
 
     free(iq_as_double);
+    free(decimated);
     free(freq);
     free(amp);
     free(stretched_freq);
@@ -178,9 +205,14 @@ static int processing_pipeline(const uint8_t *iq, size_t len)
     return 0;
 }
 
-static double *zero_centering_and_double_conversion(const uint8_t *iq, size_t len)
+static double* zero_centering_and_double_conversion(const uint8_t *iq, size_t len)
 {
     double *iq_as_double = malloc(len * sizeof(double));
+    if (iq_as_double == NULL)
+    {
+        return NULL;
+    }
+
     for (size_t i = 0; i + 1 < len; i+=2)
     {
         iq_as_double[i]     = (double) iq[i]     - 127.5;
@@ -189,37 +221,92 @@ static double *zero_centering_and_double_conversion(const uint8_t *iq, size_t le
     return iq_as_double;
 }
 
-static void normalize_complex_amplitude(double *iq, size_t len)
+/**
+ *  Anti-aliasing filter + decimation over an interleaved IQ signal
+ *  fs_in  = 2400000
+ *  fs_out = 240000
+ *  M      = 10
+ *
+ *  The input signal uses +/- 62.5 kHz, so f_nyquist = 125kHz
+ *  we take roughly x2 for the margin, so 250 kHz, and we lower to 240kHz so that we have a round 10 factor
+ *  between f_in and f_out
+ *  The filter does not filter until f = 62.5kHz and attenuate -60dB when > 175 kHz
+ *
+ *   |H(f)| dB
+ *    0 |---------\
+ *      |          \
+ *  -60 |           \_______________
+ *      |___________________________> f(Hz)
+ *      0      62.5  175
+ *
+ *      This filter introduces a delay in (FILTER_COEFF_NB - 1) / 2 complex samples
+ *
+ */
+static double* decimate(const double *input_signal, size_t input_length, double fs_in, double fs_out, size_t *output_len)
 {
-    /* First, finding the maximum magnitude */
-    double I = iq[0];
-    double Q = iq[1];
-    double max_magnitude = sqrt(I*I + Q*Q);
-    for (size_t i=2; i+1 < len; i+=2)
+    if (input_signal == NULL || output_len == NULL || fs_out <= 0 || fs_in < fs_out * 2)
     {
-        I = iq[i];
-        Q = iq[i+1];
-        double mag = sqrt(I*I + Q*Q);
-        if (mag > max_magnitude)
+        return NULL;
+    }
+
+    *output_len = 0;
+
+    if (input_length % 2 != 0)
+    {
+        fprintf(stderr, "decimation: interleaved IQ buffer must have an even length\n");
+        return NULL;
+    }
+
+    const size_t nb_samples = input_length / 2;
+    const size_t nb_coeff   = FILTER_COEFF_NB;
+
+    if (nb_samples < nb_coeff)
+    {
+        fprintf(stderr, "decimation: signal too short for a single complete window\n");
+        return NULL;
+    }
+
+    const double ratio = fs_in / fs_out;
+    const size_t decim_factor = (size_t) llround(ratio);
+
+    if (fabs(ratio - (double) decim_factor) > 1e-9 || decim_factor == 0)
+    {
+        fprintf(stderr, "decimation: fs_in / fs_out must be an integer (got %f)\n", ratio);
+        return NULL;
+    }
+
+    const size_t output_samples = (nb_samples - nb_coeff) / decim_factor + 1;
+    double* output_signal       = malloc(output_samples * 2 * sizeof(double));
+    if (output_signal == NULL)
+    {
+        return NULL;
+    }
+
+    size_t out_idx = 0;
+
+    for (size_t n = nb_coeff - 1; n < nb_samples; n += decim_factor)
+    {
+        double sum_i = 0;
+        double sum_q = 0;
+
+        for (size_t k = 0; k < nb_coeff; k++)
         {
-            max_magnitude = mag;
+            sum_i += FILTER_COEFFS[k] * input_signal[2 * (n - k)];
+            sum_q += FILTER_COEFFS[k] * input_signal[2 * (n - k) + 1];
         }
+
+        output_signal[2 * out_idx]     = sum_i;
+        output_signal[2 * out_idx + 1] = sum_q;
+        out_idx++;
     }
 
-    /* Then we compare this max magnitude with an arbitrary amplitude floor
-     * If above, we normalize. If below, we keep the magnitude as is. */
-    if (max_magnitude < dsp_data.amplitude_floor || max_magnitude == 0.0)
-    {
-        return;
-    }
+    assert(out_idx == output_samples);
 
-    for (size_t i = 0; i < len; i++)
-    {
-        iq[i] /= max_magnitude;
-    }
+    *output_len = output_samples * 2;
+    return output_signal;
 }
 
-static double *compute_instantaneous_frequency(const double *iq, const size_t iq_len, double *freq, double *amp, const size_t freq_len)
+static int compute_instantaneous_frequency(const double *iq, const size_t iq_len, double **freq, double **amp, size_t *freq_len)
 {
     /* Estimate instantaneous frequency from the phase increment. */
 
@@ -240,15 +327,19 @@ static double *compute_instantaneous_frequency(const double *iq, const size_t iq
      * Conclusion: f[n] = fe/(2*pi) * arg(z[n])
      */
 
-    if (iq == NULL || freq == NULL || amp == NULL || iq_len % 2 != 0 || iq_len < 4)
+    if (iq == NULL || iq_len % 2 != 0 || iq_len < 4)
     {
-        return NULL;
+        return -1;
     }
 
-    const double mul = dsp_data.input_fs / TWOPI;
+    const size_t f_len = iq_len / 2;
+    double* frequency = malloc(f_len * sizeof(double));
+    double* amplitude = malloc(f_len * sizeof(double));
+    if (frequency == NULL || amplitude == NULL) return -1;
+    const double mul = dsp_data.downsampled_fs / TWOPI;
 
     // z[n] * conj(z[n-1]) = (ac + bd) + j(bc - ad)
-    for (size_t n = 1; n < freq_len; n++)
+    for (size_t n = 1; n < f_len; n++)
     {
         const double a = iq[2*n];
         const double b = iq[2*n + 1];
@@ -257,28 +348,32 @@ static double *compute_instantaneous_frequency(const double *iq, const size_t iq
 
         const double re = a * c + b * d;
         const double im = b * c - a * d;
-        freq[n] = mul * atan2(im, re);
-        amp[n]  = sqrt(a * a + b * b);
+        frequency[n] = mul * atan2(im, re);
+        amplitude[n] = sqrt(a * a + b * b);
     }
 
     // pad one sample
-    freq[0] = freq[1];
-    amp[0]  = amp[1];
+    frequency[0] = frequency[1];
+    amplitude[0]  = amplitude[1];
 
-    return freq;
+    *freq_len = f_len;
+    *freq = frequency;
+    *amp = amplitude;
+
+    return 0;
 }
 
 static void prepare_amplitude_envelope(double *amp, size_t len)
 {
     if (amp == NULL || len < 2) return;
 
-    /* 1. Lissage passe-bas 1er ordre, aller puis retour pour annuler le retard */
-    const double alpha = 1.0 - exp(-1.0 / (ENVELOPE_TAU_S * dsp_data.input_fs));
+    /* low-pass 1st order, go and back to cancel delay */
+    const double alpha = 1.0 - exp(-1.0 / (ENVELOPE_TAU_S * dsp_data.downsampled_fs));
     double acc = amp[0];
     for (size_t i = 0; i < len; i++)      { acc += alpha * (amp[i] - acc); amp[i] = acc; }
     for (size_t i = len; i-- > 0; )       { acc += alpha * (amp[i] - acc); amp[i] = acc; }
 
-    /* 2. Normalisation par le maximum */
+    /* normalization from the maximum */
     double max = 0.0;
     for (size_t i = 0; i < len; i++) max = MAX(max, amp[i]);
 
@@ -288,7 +383,7 @@ static void prepare_amplitude_envelope(double *amp, size_t len)
         return;
     }
 
-    /* 3. Gate + mise à l'échelle finale */
+    /* gate + scaling */
     for (size_t i = 0; i < len; i++)
     {
         double g = (amp[i] / max - SQUELCH_RATIO) / (1.0 - SQUELCH_RATIO);
@@ -335,7 +430,7 @@ static double* time_stretch(double *x_signal, size_t x_len, double stretch_facto
         return copy;
     }
 
-    const double x_duration  = (double) x_len / dsp_data.input_fs;
+    const double x_duration  = (double) x_len / dsp_data.downsampled_fs;
     const double y_duration  = x_duration * stretch_factor;
     double n_exact = round(y_duration * dsp_data.output_fs);
     if (n_exact < 2.0)
@@ -356,7 +451,7 @@ static double* time_stretch(double *x_signal, size_t x_len, double stretch_facto
     /* Making the time axis for the input signal, x */
     for (size_t i = 0; i < x_len; i++)
     {
-        x_time[i] = (double) i / dsp_data.input_fs;
+        x_time[i] = (double) i / dsp_data.downsampled_fs;
     }
 
     /* Making the time axis for the output signal, y */
@@ -441,7 +536,7 @@ static void audio_render(const double* f, double* y, const size_t len, double *a
     for (size_t i = 0; i < len; i++)
     {
         y[i] = clip(amp_envelope[i], -1, 1) * sin(phase);
-        // y[i] = OUTPUT_AMPLITUDE * sin(phase);
+        // y2[i] = OUTPUT_AMPLITUDE * sin(phase);
         // integration of frequency (trapezoid)
         double fi = f[i];
         double fp = (i > 0) ? f[i - 1] : f[0];
@@ -461,45 +556,5 @@ static double clip(double val, double lower, double upper)
     val = val < lower ? lower : val;
     val = val > upper ? upper : val;
     return val;
-}
-
-int export_signal_csv_cmplx(const char* filename, const uint8_t *data, size_t length, size_t offset)
-{
-    FILE *f = fopen(filename, "w");
-    if (!f) {
-        perror("fopen signal.csv");
-        return -1;
-    }
-
-    fprintf(f, "index,value\n");
-    for (size_t i = offset; i < offset + length; i++) {
-        fprintf(f, "%zu,%u\n", i, data[i]);
-    }
-
-    if (fclose(f) != 0) {
-        perror("fclose signal.csv");
-        return -1;
-    }
-    return 0;
-}
-
-int export_signal_csv(const char* filename, const double *data, size_t length, size_t offset)
-{
-    FILE *f = fopen(filename, "w");
-    if (!f) {
-        perror("fopen signal.csv");
-        return -1;
-    }
-
-    fprintf(f, "index,value\n");
-    for (size_t i = offset; i < offset+length; i++) {
-        fprintf(f, "%zu,%.9g\n", i, data[i]);
-    }
-
-    if (fclose(f) != 0) {
-        perror("fclose signal.csv");
-        return -1;
-    }
-    return 0;
 }
 

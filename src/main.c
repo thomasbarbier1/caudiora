@@ -8,6 +8,13 @@
 
 // files path in the rapsberry pi: /tmp/tmp.4rshfrT8DF/caudiora/cmake-build-release-raspberrypi
 
+/*
+ * To run the project:
+ *      - open powershell, connect to rpi by ssh: $ ssh tba@192.168.1.63
+ *      - in CLion, open CMake tab (bottom left button) and click on 'Reload CMake Project'
+ *      - Run the project (it will send the files to the RPi with ssh, then Rpi will build the project and run the program)
+ */
+
 int main(void)
 {
     if (radio_config() != 0)

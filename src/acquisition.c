@@ -148,7 +148,7 @@ void get_buffer_length(uint32_t *length)
  * @param len (in) the length of the iq buffer
  * @return void
  */
-double mean_power(const uint8_t *iq, size_t len)
+double mean_power(const uint8_t *iq, const size_t len)
 {
     if (iq == NULL || len < 2)
     {
@@ -162,9 +162,8 @@ double mean_power(const uint8_t *iq, size_t len)
         double Q = iq[i+1] - 127.5;
         sum += I*I + Q*Q;
     }
-    double mp = sum / len /2;
-    // printf("mp = %.3g\n", mp);
-    return mp;
+
+    return sum / (double) len /2;;
 }
 
 /***********************************************************************************************************************
