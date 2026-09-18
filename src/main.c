@@ -1,46 +1,78 @@
 #include <stdio.h>
 #include <stdint.h>
-#include <stdbool.h>
+#include <unistd.h>
+#include <pthread.h>
 #include <stdlib.h>
-#include <errno.h>
-#include <time.h>
-#include "rtl-sdr.h"
-#include "rtlsdr_interface.h"
+#include "output.h"
+#include "radio_interface.h"
+#include "acquisition.h"
+#include "processing.h"
 
-#define CENTER_FREQUENCY     (uint32_t)868300000
-#define SAMPLE_RATE          (uint32_t)2400000
-#define BANDWIDTH            (uint32_t)125000
+// files path in the rapsberry pi: /tmp/tmp.4rshfrT8DF/caudiora/cmake-build-release-raspberrypi
 
-rtlsdr_context_t radio_context = {
-    .lock = PTHREAD_MUTEX_INITIALIZER,
-    .cv   = PTHREAD_COND_INITIALIZER,
-    .new_data_is_available = false,
-    .running = true,
-    .data = 0,
-    .data_len = 0
-};
+/*
+ * To run the project:
+ *      - open powershell, connect to rpi by ssh: $ ssh tba@192.168.1.63
+ *      - in CLion, open CMake tab (bottom left button) and click on 'Reload CMake Project'
+ *      - Run the project (it will send the files to the RPi with ssh, then Rpi will build the project and run the program)
+ */
 
-rtlsdr_dev_t *radio_device;
-
-int main(void)
+int main(int argc, char* argv[])
 {
-    const rtlsdr_config_t config =
+    if (argc != 2)
     {
-        .central_frequency = CENTER_FREQUENCY,
-        .bandwidth         = BANDWIDTH,
-        .sample_rate       = SAMPLE_RATE,
-    };
-
-    if (rtlsdr_init(&config) != 0)
-    {
-        printf("Error: unable to configure radio device\n");
+        printf("Usage: ./caudiora <duration>\n");
+        return EXIT_FAILURE;
     }
 
+    if (radio_config() != 0)
+    {
+        printf("Failed to configure the radio. End of program.\n");
+        return EXIT_FAILURE;
+    }
 
-    rtlsdr_stream_start();
-    rtlsdr_stream_stop();
+    if (radio_init() != 0)
+    {
+        printf("Failed to initialize radio parameters. End of program.\n");
+        return EXIT_FAILURE;
+    }
+
+    if (acquisition_init() != 0)
+    {
+        printf("Failed to initialize acquisition. End of program.\n");
+        return EXIT_FAILURE;
+    }
+
+    if (processing_init() != 0)
+    {
+        printf("Failed to initialize processing. End of program.\n");
+        return EXIT_FAILURE;
+    }
+
+    if (output_open("plughw:Headphones,0", (unsigned int) 44100) < 0)
+    {
+        printf("Unable to open audio device\n");
+        return EXIT_FAILURE;
+    }
+
+    pthread_t radio_thread;
+    pthread_create(&radio_thread, NULL, radio_stream_start, NULL);
+
+    pthread_t processing_thread;
+    pthread_create(&processing_thread, NULL, processing_start, NULL);
+
+    const int duration = atoi(argv[1]);
+    sleep(duration);
+
+    uint32_t overflow_nb = radio_stream_stop();
+    pthread_join(radio_thread, NULL);
+    // printf("Number of buffer overflow: %u\n", overflow_nb);
+    processing_stop();
+    pthread_join(processing_thread, NULL);
+    output_close();
 
     printf("End of program.\n");
+
     return 0;
 }
 
