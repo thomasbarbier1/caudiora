@@ -8,6 +8,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(RTLSDR REQUIRED IMPORTED_TARGET librtlsdr)
 pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
+pkg_check_modules(ALSA REQUIRED IMPORTED_TARGET alsa)
 
 add_executable(caudiora
         src/main.c
@@ -17,4 +18,4 @@ add_executable(caudiora
         src/output.c
 )
 
-target_link_libraries(caudiora PRIVATE PkgConfig::RTLSDR PkgConfig::SNDFILE m)
+target_link_libraries(caudiora PRIVATE PkgConfig::RTLSDR PkgConfig::SNDFILE PkgConfig::ALSA m)
