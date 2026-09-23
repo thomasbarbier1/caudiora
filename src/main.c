@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) 2018, Thomas Barbier
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+/**
+ * @file main.c
+ * @brief Initializes the various modules, starts the threads, and then triggers a timer.
+ * When the timer expires, the threads are stopped and the program terminates.
+ */
+
 #include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -7,15 +29,6 @@
 #include "radio_interface.h"
 #include "acquisition.h"
 #include "processing.h"
-
-// files path in the rapsberry pi: /tmp/tmp.4rshfrT8DF/caudiora/cmake-build-release-raspberrypi
-
-/*
- * To run the project:
- *      - open powershell, connect to rpi by ssh: $ ssh tba@192.168.1.63
- *      - in CLion, open CMake tab (bottom left button) and click on 'Reload CMake Project'
- *      - Run the project (it will send the files to the RPi with ssh, then Rpi will build the project and run the program)
- */
 
 int main(int argc, char* argv[])
 {
@@ -56,10 +69,10 @@ int main(int argc, char* argv[])
     }
 
     pthread_t radio_thread;
-    pthread_create(&radio_thread, NULL, radio_stream_start, NULL);
+    pthread_create(&radio_thread, NULL, radio_stream_thread, NULL);
 
     pthread_t processing_thread;
-    pthread_create(&processing_thread, NULL, processing_start, NULL);
+    pthread_create(&processing_thread, NULL, processing_thread, NULL);
 
     const int duration = atoi(argv[1]);
     sleep(duration);

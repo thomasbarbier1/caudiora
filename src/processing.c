@@ -1,3 +1,24 @@
+/*
+ * Copyright (c) 2018, Thomas Barbier
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+/**
+ * @file processing.c
+ * @brief Receives the recording, and process the signal to make it audible. Then, output the rendered audio signal.
+ */
+
 #include <stdio.h>
 #include <semaphore.h>
 #include <stdatomic.h>
@@ -5,17 +26,11 @@
 #include <stdbool.h>
 #include <math.h>
 #include <string.h>
-#include "processing.h"
-
 #include <assert.h>
-
+#include "processing.h"
 #include "acquisition.h"
 #include "radio_interface.h"
 #include "output.h"
-
-#define MIN(a,b) ((a) < (b) ? (a) : (b))
-#define MAX(a,b) ((a) > (b) ? (a) : (b))
-#define TESTNAME "caudiora_test.wav"
 
 #define AUDIO_RECORDING_SIZE (size_t) 16777216
 #define LP_FILTER_CUTOFF     (double) 125000
@@ -25,12 +40,15 @@
 #define OUTPUT_AMPLITUDE     (double) 0.9
 #define AUDIO_SAMPLE_PERIOD  (double) (1 / AUDIO_SAMPLE_RATE)
 #define STRETCH_FACTOR       (double) 4.0
-#define ENVELOPE_TAU_S       (double) 500e-6   /* constante de temps du lissage */
-#define SQUELCH_RATIO        (double) 0.25     /* seuil de gate, en fraction du max */
+#define ENVELOPE_TAU_S       (double) 500e-6   /* time constant for smoothing */
+#define SQUELCH_RATIO        (double) 0.25     /* gate threshold as a fraction of max */
 #define FILTER_COEFF_NB      (int) 79
 #define DOWNSAMPING_FS       (double) 240000
 #define PIPELINE_FAIL_CODE   (int) 1
 #define PIPELINE_SUCCES_CODE (int) 0
+
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
 
 // see filter_coeff.py python script to see how the coeff are pre-calculated
 static const double FILTER_COEFFS[FILTER_COEFF_NB] =
@@ -148,7 +166,7 @@ int processing_stop(void)
     return 0;
 }
 
-void* processing_start(void *ctx)
+void* processing_thread(void *ctx)
 {
     while (dsp_data.running)
     {
